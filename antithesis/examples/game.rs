@@ -1,7 +1,8 @@
-use antithesis::app::VulkanApp;
+use antithesis::app::run_app;
+
 
 fn main() {
-    VulkanApp::initialize(1280, 720);
+    run_app();
 }
 
 
