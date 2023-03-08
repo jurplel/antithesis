@@ -1,8 +1,6 @@
 
-use crate::{device::get_device, swapchain::SwapchainInfo};
-use crate::swapchain::create_swapchain;
+use crate::{swapchain::{create_swapchain, SwapchainInfo}, device::{pick_physical_device, create_logical_device, QueueFamilyIndices}};
 
-use ash::vk::PipelineShaderStageCreateInfo;
 use ash::{
     extensions::khr::Surface,
     vk::{self, ApplicationInfo},
@@ -22,9 +20,13 @@ pub struct VulkanApp {
     instance: Instance,
     physical_device: vk::PhysicalDevice,
     device: ash::Device, // Logical device
-    gfx_queue: vk::Queue,
+    graphics_queue: vk::Queue,
+    present_queue: vk::Queue,
     swapchain_info: SwapchainInfo,
-    gfx_pipeline: vk::Pipeline
+    gfx_pipeline: vk::Pipeline,
+    swapchain_framebuffers: Vec<vk::Framebuffer>,
+    command_pool: vk::CommandPool,
+    command_buffers: Vec<vk::CommandBuffer>
 }
 
 impl VulkanApp {
@@ -38,19 +40,31 @@ impl VulkanApp {
         let instance = create_instance(&window, &entry);
        
         // Create surface and other surface thing
-        let (surface, surface_loader) = create_surface(&window, &entry, &instance);
+        let surface_info = SurfaceInfo::create(&window, &entry, &instance);
 
         // Get physical device, logical device, and gfx queue
-        let (physical_device, device, gfx_queue) = unsafe { get_device(&instance, &surface_loader, &surface) };
+        let physical_device = pick_physical_device(&instance, &surface_info);
 
-        let swapchain_info = create_swapchain(&instance, &device, &physical_device, &surface, &surface_loader);
+        let (device, queue_families) = create_logical_device(&instance, &physical_device, &surface_info);
 
+        let graphics_queue =
+            unsafe { device.get_device_queue(queue_families.graphics_family.unwrap(), 0) };
+        let present_queue =
+            unsafe { device.get_device_queue(queue_families.present_family.unwrap(), 0) };
+
+        let swapchain_info = create_swapchain(&instance, &device, &physical_device, &surface_info);
 
         let render_pass = create_render_pass(&device, &swapchain_info.swapchain_format);
 
         let gfx_pipeline = create_gfx_pipeline(&device, render_pass, &swapchain_info.swapchain_extent);
 
-        VulkanApp { window, entry, instance, physical_device, device, gfx_queue, swapchain_info, gfx_pipeline }
+        let swapchain_framebuffers = create_framebuffers(&device, render_pass, &swapchain_info.swapchain_imageviews, &swapchain_info.swapchain_extent);
+
+        let command_pool = create_command_pool(&device, &queue_families);
+
+        let command_buffers = create_command_buffers(&device, command_pool, gfx_pipeline, &swapchain_framebuffers, render_pass, swapchain_info.swapchain_extent);
+
+        VulkanApp { window, entry, instance, physical_device, device, graphics_queue, present_queue, swapchain_info, gfx_pipeline, swapchain_framebuffers, command_pool, command_buffers }
     }
 }
 
@@ -61,6 +75,72 @@ impl VulkanApp {
 //         }    
 //     }
 // }
+
+fn create_command_buffers(
+    device: &ash::Device,
+    command_pool: vk::CommandPool,
+    graphics_pipeline: vk::Pipeline,
+    framebuffers: &Vec<vk::Framebuffer>,
+    render_pass: vk::RenderPass,
+    surface_extent: vk::Extent2D,
+) -> Vec<vk::CommandBuffer> {
+    let command_buffer_allocate_info = vk::CommandBufferAllocateInfo::builder()
+        .command_pool(command_pool)
+        .command_buffer_count(framebuffers.len() as u32)
+        .level(vk::CommandBufferLevel::PRIMARY);
+
+    let command_buffers = unsafe {
+        device.allocate_command_buffers(&command_buffer_allocate_info)
+        .expect("Failed to allocate command buffers!")
+    };
+
+    for (i, &command_buffer) in command_buffers.iter().enumerate() {
+        let command_buffer_begin_info = vk::CommandBufferBeginInfo::builder()
+            .flags(vk::CommandBufferUsageFlags::SIMULTANEOUS_USE);
+
+        unsafe {
+            device.begin_command_buffer(command_buffer, &command_buffer_begin_info)
+            .expect("Failed to begin recording command buffer at beginning!");
+        };
+
+        let clear_values = [vk::ClearValue {
+            color: vk::ClearColorValue {
+                float32: [0.0, 0.0, 0.0, 1.0],
+            },
+        }];
+
+        let render_pass_begin_info = vk::RenderPassBeginInfo::builder()
+            .render_pass(render_pass)
+            .framebuffer(framebuffers[i])
+            .render_area(*vk::Rect2D::builder().offset(*vk::Offset2D::builder()).extent(surface_extent))
+            .clear_values(&clear_values);
+
+        unsafe {
+            device.cmd_begin_render_pass(command_buffer, &render_pass_begin_info, vk::SubpassContents::INLINE);
+            device.cmd_bind_pipeline(command_buffer, vk::PipelineBindPoint::GRAPHICS, graphics_pipeline);
+            device.cmd_draw(command_buffer, 3, 1, 0, 0);
+            device.cmd_end_render_pass(command_buffer);
+
+            device.end_command_buffer(command_buffer).expect("Failed to record command buffer at ending!");
+        }
+    };
+
+    command_buffers
+}
+
+fn create_command_pool(
+    device: &ash::Device,
+    queue_families: &QueueFamilyIndices,
+) -> vk::CommandPool {
+    let command_pool_create_info = vk::CommandPoolCreateInfo::builder()
+        .queue_family_index(queue_families.graphics_family.unwrap());
+
+    unsafe {
+        device
+            .create_command_pool(&command_pool_create_info, None)
+            .expect("Failed to create Command Pool!")
+    }
+}
 
 fn create_render_pass(device: &ash::Device, surface_format: &vk::Format) -> vk::RenderPass {
     let color_attachment = vk::AttachmentDescription::builder()
@@ -105,6 +185,36 @@ fn create_render_pass(device: &ash::Device, surface_format: &vk::Format) -> vk::
             .create_render_pass(&render_pass_create_info, None)
             .expect("Failed to create render pass!")
     }
+}
+
+fn create_framebuffers(
+    device: &ash::Device,
+    render_pass: vk::RenderPass,
+    image_views: &Vec<vk::ImageView>,
+    swapchain_extent: &vk::Extent2D,
+) -> Vec<vk::Framebuffer> {
+    let mut framebuffers = vec![];
+
+    for &image_view in image_views.iter() {
+        let attachments = [image_view];
+
+        let framebuffer_create_info = vk::FramebufferCreateInfo::builder()
+            .render_pass(render_pass)
+            .attachments(&attachments)
+            .width(swapchain_extent.width)
+            .height(swapchain_extent.height)
+            .layers(1);
+
+        let framebuffer = unsafe {
+            device
+                .create_framebuffer(&framebuffer_create_info, None)
+                .expect("Failed to create Framebuffer!")
+        };
+
+        framebuffers.push(framebuffer);
+    }
+
+    framebuffers
 }
 
 fn create_gfx_pipeline(device: &ash::Device, render_pass: vk::RenderPass, swapchain_extent: &vk::Extent2D) -> vk::Pipeline {
@@ -244,23 +354,30 @@ fn create_window(width: u32, height: u32, title: &str) -> Window {
         .unwrap()
 }
 
-
-fn create_surface(window: &Window, entry: &Entry, instance: &Instance) -> (vk::SurfaceKHR, Surface) {
-    let surface = unsafe {
-        ash_window::create_surface(
-            &entry,
-            &instance,
-            window.raw_display_handle(),
-            window.raw_window_handle(),
-            None,
-        )
-        .unwrap() };
-
-    // What is this actually? How is this different from the surfaceKHR above?
-    let surface_loader = Surface::new(&entry, &instance);
-
-    (surface, surface_loader)
+pub struct SurfaceInfo {
+    pub surface: vk::SurfaceKHR,
+    pub surface_loader: Surface
 }
+
+impl SurfaceInfo {
+    pub fn create(window: &Window, entry: &Entry, instance: &Instance) -> Self {
+        let surface = unsafe {
+            ash_window::create_surface(
+                &entry,
+                &instance,
+                window.raw_display_handle(),
+                window.raw_window_handle(),
+                None,
+            )
+            .unwrap() };
+
+        // What is this actually? How is this different from the surfaceKHR above?
+        let surface_loader = Surface::new(&entry, &instance);
+
+        SurfaceInfo { surface, surface_loader }
+    }
+}
+
 
 fn create_instance(window: &Window, entry: &Entry) -> Instance {
     let app_name = CStr::from_bytes_with_nul(b"Demo\0").unwrap();

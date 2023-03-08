@@ -2,6 +2,8 @@ use std::ptr;
 
 use ash::vk::{SurfaceKHR, self};
 
+use crate::app::SurfaceInfo;
+
 pub struct SwapchainInfo {
     pub swapchain_loader: ash::extensions::khr::Swapchain,
     pub swapchain: vk::SwapchainKHR,
@@ -11,32 +13,33 @@ pub struct SwapchainInfo {
     pub swapchain_imageviews: Vec<vk::ImageView>
 }
 
-struct SwapChainSupportDetail {
-    capabilities: vk::SurfaceCapabilitiesKHR,
-    formats: Vec<vk::SurfaceFormatKHR>,
-    present_modes: Vec<vk::PresentModeKHR>,
+pub struct SwapChainSupportDetail {
+    pub capabilities: vk::SurfaceCapabilitiesKHR,
+    pub formats: Vec<vk::SurfaceFormatKHR>,
+    pub present_modes: Vec<vk::PresentModeKHR>,
 }
 
 impl SwapChainSupportDetail {
-    unsafe fn query(
+    pub fn query(
         physical_device: &vk::PhysicalDevice,
-        surface: &SurfaceKHR,
-        surface_loader: &ash::extensions::khr::Surface
+        surface_info: &SurfaceInfo,
     ) -> Self {
-        let capabilities = surface_loader
-            .get_physical_device_surface_capabilities(*physical_device, *surface)
-            .expect("Failed to query for surface capabilities.");
-        let formats = surface_loader
-            .get_physical_device_surface_formats(*physical_device, *surface)
-            .expect("Failed to query for surface formats.");
-        let present_modes = surface_loader
-            .get_physical_device_surface_present_modes(*physical_device, *surface)
-            .expect("Failed to query for surface present mode.");
+        unsafe {
+            let capabilities = surface_info.surface_loader
+                .get_physical_device_surface_capabilities(*physical_device, surface_info.surface)
+                .expect("Failed to query for surface capabilities.");
+            let formats = surface_info.surface_loader
+                .get_physical_device_surface_formats(*physical_device, surface_info.surface)
+                .expect("Failed to query for surface formats.");
+            let present_modes = surface_info.surface_loader
+                .get_physical_device_surface_present_modes(*physical_device, surface_info.surface)
+                .expect("Failed to query for surface present mode.");
 
-        SwapChainSupportDetail {
-            capabilities,
-            formats,
-            present_modes,
+            SwapChainSupportDetail {
+                capabilities,
+                formats,
+                present_modes,
+            }
         }
     }
 
@@ -83,10 +86,9 @@ pub fn create_swapchain(
     instance: &ash::Instance,
     device: &ash::Device,
     physical_device: &vk::PhysicalDevice,
-    surface: &SurfaceKHR,
-    surface_loader: &ash::extensions::khr::Surface
+    surface_info: &SurfaceInfo,
 ) -> SwapchainInfo {
-    let swapchain_support = unsafe { SwapChainSupportDetail::query(physical_device, surface, surface_loader) };
+    let swapchain_support = unsafe { SwapChainSupportDetail::query(physical_device, surface_info) };
 
     let surface_format = swapchain_support.choose_format(); 
 
@@ -125,7 +127,7 @@ pub fn create_swapchain(
         s_type: vk::StructureType::SWAPCHAIN_CREATE_INFO_KHR,
         p_next: ptr::null(),
         flags: vk::SwapchainCreateFlagsKHR::empty(),
-        surface: *surface,
+        surface: surface_info.surface,
         min_image_count: image_count,
         image_color_space: surface_format.color_space,
         image_format: surface_format.format,
