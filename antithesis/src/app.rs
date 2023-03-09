@@ -18,6 +18,8 @@ struct VulkanApp {
     window: Window,
     entry: Entry,
     instance: Instance,
+    surface_info: SurfaceInfo,
+
     physical_device: vk::PhysicalDevice,
     device: ash::Device, // Logical device
    
@@ -25,6 +27,9 @@ struct VulkanApp {
     present_queue: vk::Queue,
 
     swapchain_info: SwapchainInfo,
+
+    render_pass: vk::RenderPass,
+    pipeline_layout: vk::PipelineLayout,
     gfx_pipeline: vk::Pipeline,
     swapchain_framebuffers: Vec<vk::Framebuffer>,
 
@@ -35,6 +40,8 @@ struct VulkanApp {
     render_finished_semaphores: Vec<vk::Semaphore>,
     in_flight_fences: Vec<vk::Fence>,
     current_frame: usize,
+
+    is_framebuffer_resized: bool,
 }
 
 impl VulkanApp {
@@ -63,7 +70,7 @@ impl VulkanApp {
 
         let render_pass = create_render_pass(&device, &swapchain_info.swapchain_format);
 
-        let gfx_pipeline = create_gfx_pipeline(&device, render_pass, &swapchain_info.swapchain_extent);
+        let (pipeline_layout, gfx_pipeline) = create_gfx_pipeline(&device, render_pass, &swapchain_info.swapchain_extent);
 
         let swapchain_framebuffers = create_framebuffers(&device, render_pass, &swapchain_info.swapchain_imageviews, &swapchain_info.swapchain_extent);
 
@@ -73,7 +80,7 @@ impl VulkanApp {
 
         let sync_objects = create_sync_objects(&device);
 
-        VulkanApp { window, entry, instance, physical_device, device, graphics_queue, present_queue, swapchain_info, gfx_pipeline, swapchain_framebuffers, command_pool, command_buffers, image_available_semaphores: sync_objects.image_available_semaphores, render_finished_semaphores: sync_objects.render_finished_semaphores, in_flight_fences: sync_objects.inflight_fences, current_frame: 0 }
+        VulkanApp { window, entry, instance, surface_info, physical_device, device, graphics_queue, present_queue, swapchain_info, render_pass, pipeline_layout, gfx_pipeline, swapchain_framebuffers, command_pool, command_buffers, image_available_semaphores: sync_objects.image_available_semaphores, render_finished_semaphores: sync_objects.render_finished_semaphores, in_flight_fences: sync_objects.inflight_fences, current_frame: 0, is_framebuffer_resized: false }
     }
 
     fn draw_frame(&mut self) {
@@ -128,13 +135,63 @@ impl VulkanApp {
             .swapchains(&swapchains)
             .image_indices(&image_indices);
 
-        unsafe {
+        let result = unsafe {
             self.swapchain_info.swapchain_loader
                 .queue_present(self.present_queue, &present_info)
-                .expect("Failed to execute queue present.");
+        };
+        let is_resized = match result {
+            Ok(_) => self.is_framebuffer_resized,
+            Err(vk_result) => match vk_result {
+                vk::Result::ERROR_OUT_OF_DATE_KHR | vk::Result::SUBOPTIMAL_KHR => true,
+                _ => panic!("Failed to execute queue present."),
+            },
+        };
+        if is_resized {
+            self.is_framebuffer_resized = false;
+            self.recreate_swapchain();
         }
 
         self.current_frame = (self.current_frame + 1) % MAX_FRAMES_IN_FLIGHT;
+    }
+
+    fn recreate_swapchain(&mut self) {
+        unsafe {
+            self.device
+                .device_wait_idle()
+                .expect("Failed to wait device idle!")
+        };
+        self.cleanup_swapchain();
+
+        let swapchain_info = create_swapchain(&self.instance, &self.device, &self.physical_device, &self.surface_info);
+
+        self.swapchain_info = swapchain_info;
+
+        self.render_pass = create_render_pass(&self.device, &self.swapchain_info.swapchain_format);
+        (self.pipeline_layout, self.gfx_pipeline) = create_gfx_pipeline(
+            &self.device,
+            self.render_pass,
+            &self.swapchain_info.swapchain_extent,
+        );
+
+        self.swapchain_framebuffers = create_framebuffers(&self.device, self.render_pass, &self.swapchain_info.swapchain_imageviews, &self.swapchain_info.swapchain_extent);
+        self.command_buffers = create_command_buffers(&self.device, self.command_pool, self.gfx_pipeline, &self.swapchain_framebuffers, self.render_pass, self.swapchain_info.swapchain_extent);
+    }
+
+    fn cleanup_swapchain(&self) {
+        unsafe {
+            self.device.free_command_buffers(self.command_pool, &self.command_buffers);
+            for &framebuffer in self.swapchain_framebuffers.iter() {
+                self.device.destroy_framebuffer(framebuffer, None);
+            }
+            self.device.destroy_pipeline(self.gfx_pipeline, None);
+            self.device.destroy_pipeline_layout(self.pipeline_layout, None);
+            self.device.destroy_render_pass(self.render_pass, None);
+            for &image_view in self.swapchain_info.swapchain_imageviews.iter() {
+                self.device.destroy_image_view(image_view, None);
+            }
+            self.swapchain_info.swapchain_loader
+                .destroy_swapchain(self.swapchain_info.swapchain, None);
+        }
     }
 
     fn run(mut self, event_loop: EventLoop<()>) {
@@ -167,13 +224,28 @@ impl VulkanApp {
     }
 }
 
-// impl Drop for VulkanApp {
-//     fn drop(&mut self) {
-//         unsafe {
-//             self.swapchain
-//         }    
-//     }
-// }
+impl Drop for VulkanApp {
+    fn drop(&mut self) {
+        unsafe {
+            for i in 0..MAX_FRAMES_IN_FLIGHT {
+                self.device
+                    .destroy_semaphore(self.image_available_semaphores[i], None);
+                self.device
+                    .destroy_semaphore(self.render_finished_semaphores[i], None);
+                self.device.destroy_fence(self.in_flight_fences[i], None);
+            }
+
+            self.cleanup_swapchain();
+
+            self.device.destroy_command_pool(self.command_pool, None);
+
+            self.device.destroy_device(None);
+            self.surface_info.surface_loader.destroy_surface(self.surface_info.surface, None);
+
+            self.instance.destroy_instance(None);
+        }
+    }
+}
 
 pub fn run_app() {
     let (event_loop, window) = create_window(1280, 720, "Antithesis");
@@ -368,7 +440,7 @@ fn create_framebuffers(
     framebuffers
 }
 
-fn create_gfx_pipeline(device: &ash::Device, render_pass: vk::RenderPass, swapchain_extent: &vk::Extent2D) -> vk::Pipeline {
+fn create_gfx_pipeline(device: &ash::Device, render_pass: vk::RenderPass, swapchain_extent: &vk::Extent2D) -> (vk::PipelineLayout, vk::Pipeline) {
     let mut vert_file = Cursor::new(&include_bytes!("../shaders/vert.spv"));
     let mut frag_file = Cursor::new(&include_bytes!("../shaders/frag.spv"));
 
@@ -483,7 +555,7 @@ fn create_gfx_pipeline(device: &ash::Device, render_pass: vk::RenderPass, swapch
         device.destroy_shader_module(frag_shader, None);
     }
 
-    graphics_pipeline[0]
+    (pipeline_layout, graphics_pipeline[0])
 }
 
 fn create_shader_module(device: &ash::Device, file: &mut (impl std::io::Seek + std::io::Read)) -> vk::ShaderModule {

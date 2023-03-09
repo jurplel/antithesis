@@ -1,6 +1,6 @@
 use std::ptr;
 
-use ash::vk::{SurfaceKHR, self};
+use ash::vk;
 
 use crate::app::SurfaceInfo;
 
@@ -88,7 +88,7 @@ pub fn create_swapchain(
     physical_device: &vk::PhysicalDevice,
     surface_info: &SurfaceInfo,
 ) -> SwapchainInfo {
-    let swapchain_support = unsafe { SwapChainSupportDetail::query(physical_device, surface_info) };
+    let swapchain_support = SwapChainSupportDetail::query(physical_device, surface_info);
 
     let surface_format = swapchain_support.choose_format(); 
 
@@ -123,26 +123,20 @@ pub fn create_swapchain(
 
 
     // TODO: Construct with a builder!
-    let create_info = vk::SwapchainCreateInfoKHR {
-        s_type: vk::StructureType::SWAPCHAIN_CREATE_INFO_KHR,
-        p_next: ptr::null(),
-        flags: vk::SwapchainCreateFlagsKHR::empty(),
-        surface: surface_info.surface,
-        min_image_count: image_count,
-        image_color_space: surface_format.color_space,
-        image_format: surface_format.format,
-        image_extent: swapchain_extent,
-        image_usage: vk::ImageUsageFlags::COLOR_ATTACHMENT,
-        image_sharing_mode,
-        p_queue_family_indices: queue_family_indices.as_ptr(),
-        queue_family_index_count,
-        pre_transform: swapchain_support.capabilities.current_transform,
-        composite_alpha: vk::CompositeAlphaFlagsKHR::OPAQUE,
-        present_mode,
-        clipped: vk::TRUE,
-        old_swapchain: vk::SwapchainKHR::null(),
-        image_array_layers: 1,
-    };
+    let create_info = vk::SwapchainCreateInfoKHR::builder()
+        .surface(surface_info.surface)
+        .min_image_count(image_count)
+        .image_color_space(surface_format.color_space)
+        .image_format(surface_format.format)
+        .image_extent(swapchain_extent)
+        .image_usage(vk::ImageUsageFlags::COLOR_ATTACHMENT)
+        .image_sharing_mode(image_sharing_mode)
+        .queue_family_indices(&queue_family_indices)
+        .pre_transform(swapchain_support.capabilities.current_transform)
+        .composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE)
+        .present_mode(present_mode)
+        .clipped(true)
+        .image_array_layers(1);
 
     let swapchain_loader = ash::extensions::khr::Swapchain::new(instance, device);
     let swapchain = unsafe {
