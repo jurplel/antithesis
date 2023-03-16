@@ -1,3 +1,5 @@
 pub mod app;
-mod swapchain;
 mod device;
+mod pipeline;
+mod swapchain;
+mod sync;

@@ -10,7 +10,7 @@ pub struct SwapchainInfo {
     pub swapchain_images: Vec<vk::Image>,
     pub swapchain_format: vk::Format,
     pub swapchain_extent: vk::Extent2D,
-    pub swapchain_imageviews: Vec<vk::ImageView>
+    pub swapchain_imageviews: Vec<vk::ImageView>,
 }
 
 pub struct SwapChainSupportDetail {
@@ -20,18 +20,18 @@ pub struct SwapChainSupportDetail {
 }
 
 impl SwapChainSupportDetail {
-    pub fn query(
-        physical_device: &vk::PhysicalDevice,
-        surface_info: &SurfaceInfo,
-    ) -> Self {
+    pub fn query(physical_device: &vk::PhysicalDevice, surface_info: &SurfaceInfo) -> Self {
         unsafe {
-            let capabilities = surface_info.surface_loader
+            let capabilities = surface_info
+                .surface_loader
                 .get_physical_device_surface_capabilities(*physical_device, surface_info.surface)
                 .expect("Failed to query for surface capabilities.");
-            let formats = surface_info.surface_loader
+            let formats = surface_info
+                .surface_loader
                 .get_physical_device_surface_formats(*physical_device, surface_info.surface)
                 .expect("Failed to query for surface formats.");
-            let present_modes = surface_info.surface_loader
+            let present_modes = surface_info
+                .surface_loader
                 .get_physical_device_surface_present_modes(*physical_device, surface_info.surface)
                 .expect("Failed to query for surface present mode.");
 
@@ -75,8 +75,12 @@ impl SwapChainSupportDetail {
         } else {
             // TODO: remove hard-coded window size
             vk::Extent2D {
-                width: 1280.max(self.capabilities.min_image_extent.width).min(self.capabilities.max_image_extent.width),
-                height: 720.max(self.capabilities.min_image_extent.height).min(self.capabilities.max_image_extent.height)
+                width: 1280
+                    .max(self.capabilities.min_image_extent.width)
+                    .min(self.capabilities.max_image_extent.width),
+                height: 720
+                    .max(self.capabilities.min_image_extent.height)
+                    .min(self.capabilities.max_image_extent.height),
             }
         }
     }
@@ -90,7 +94,7 @@ pub fn create_swapchain(
 ) -> SwapchainInfo {
     let swapchain_support = SwapChainSupportDetail::query(physical_device, surface_info);
 
-    let surface_format = swapchain_support.choose_format(); 
+    let surface_format = swapchain_support.choose_format();
 
     let present_mode = swapchain_support.choose_present_mode();
 
@@ -98,14 +102,15 @@ pub fn create_swapchain(
 
     // Just a kinda weird way of getting the image count of the swapchain
     let image_count = swapchain_support.capabilities.min_image_count + 1;
-        let image_count = if swapchain_support.capabilities.max_image_count > 0 {
-            image_count.min(swapchain_support.capabilities.max_image_count)
-        } else {
-            image_count
-        };
+    let image_count = if swapchain_support.capabilities.max_image_count > 0 {
+        image_count.min(swapchain_support.capabilities.max_image_count)
+    } else {
+        image_count
+    };
 
     // let's do it all on one queue for now :(
-    let (image_sharing_mode, queue_family_index_count, queue_family_indices) = (vk::SharingMode::EXCLUSIVE, 0, vec![]);
+    let (image_sharing_mode, _queue_family_index_count, queue_family_indices) =
+        (vk::SharingMode::EXCLUSIVE, 0, vec![]);
 
     // let (image_sharing_mode, queue_family_index_count, queue_family_indices) =
     //     if queue_family.graphics_family != queue_family.present_family {
@@ -120,7 +125,6 @@ pub fn create_swapchain(
     //     } else {
     //         (vk::SharingMode::EXCLUSIVE, 0, vec![])
     //     };
-
 
     // TODO: Construct with a builder!
     let create_info = vk::SwapchainCreateInfoKHR::builder()
@@ -153,8 +157,15 @@ pub fn create_swapchain(
 
     let swapchain_imageviews = create_image_views(device, surface_format.format, &swapchain_images);
 
-    SwapchainInfo { swapchain_loader, swapchain, swapchain_images, swapchain_format: surface_format.format, swapchain_extent, swapchain_imageviews }
-} 
+    SwapchainInfo {
+        swapchain_loader,
+        swapchain,
+        swapchain_images,
+        swapchain_format: surface_format.format,
+        swapchain_extent,
+        swapchain_imageviews,
+    }
+}
 
 fn create_image_views(
     device: &ash::Device,

@@ -1,9 +1,9 @@
-use std::{collections::HashSet, ffi::{CStr, c_char}};
-
-use ash::{
-    vk,
-    Instance, extensions::khr::Swapchain,
+use std::{
+    collections::HashSet,
+    ffi::{c_char, CStr},
 };
+
+use ash::{extensions::khr::Swapchain, vk, Instance};
 
 use crate::{app::SurfaceInfo, swapchain::SwapChainSupportDetail};
 
@@ -24,7 +24,6 @@ impl QueueFamilyIndices {
         self.graphics_family.is_some() && self.present_family.is_some()
     }
 }
-
 
 fn find_queue_family(
     instance: &ash::Instance,
@@ -51,7 +50,8 @@ fn find_queue_family(
                     physical_device,
                     index as u32,
                     surface_info.surface,
-                ).unwrap()
+                )
+                .unwrap()
         };
 
         if queue_family.queue_count > 0 && is_present_support {
@@ -136,8 +136,7 @@ fn is_physical_device_suitable(
     let indices = find_queue_family(instance, physical_device, surface_info);
 
     let is_queue_family_supported = indices.is_complete();
-    let is_device_extension_supported =
-        check_device_extension_support(instance, physical_device);
+    let is_device_extension_supported = check_device_extension_support(instance, physical_device);
     let is_swapchain_supported = if is_device_extension_supported {
         let swapchain_support = SwapChainSupportDetail::query(&physical_device, surface_info);
         !swapchain_support.formats.is_empty() && !swapchain_support.present_modes.is_empty()
@@ -145,17 +144,12 @@ fn is_physical_device_suitable(
         false
     };
 
-    return is_queue_family_supported
-        && is_device_extension_supported
-        && is_swapchain_supported;
+    return is_queue_family_supported && is_device_extension_supported && is_swapchain_supported;
 }
 
 // todo: split to physical & logical device construction
 // todo: isolate unsafe blocks instead of making this fn unsafe
-pub fn pick_physical_device(
-    instance: &Instance,
-    surface_info: &SurfaceInfo,
-) -> vk::PhysicalDevice {
+pub fn pick_physical_device(instance: &Instance, surface_info: &SurfaceInfo) -> vk::PhysicalDevice {
     let physical_devices = unsafe {
         instance
             .enumerate_physical_devices()
@@ -167,13 +161,12 @@ pub fn pick_physical_device(
     });
 
     *result.expect("Failed to find a suitable GPU!")
-
 }
 
 pub fn create_logical_device(
     instance: &ash::Instance,
     physical_device: &vk::PhysicalDevice,
-    surface_info: &SurfaceInfo
+    surface_info: &SurfaceInfo,
 ) -> (ash::Device, QueueFamilyIndices) {
     let indices = find_queue_family(instance, *physical_device, surface_info);
 
@@ -182,11 +175,14 @@ pub fn create_logical_device(
     unique_queue_families.insert(indices.present_family.unwrap());
 
     // Single queue with priority 1, supporting graphics as found above
-    let queue_create_infos = unique_queue_families.iter().map(|queue_family| {
-        *vk::DeviceQueueCreateInfo::builder()
-            .queue_family_index(*queue_family)
-            .queue_priorities(&[1.0])
-    }).collect::<Vec<_>>();
+    let queue_create_infos = unique_queue_families
+        .iter()
+        .map(|queue_family| {
+            *vk::DeviceQueueCreateInfo::builder()
+                .queue_family_index(*queue_family)
+                .queue_priorities(&[1.0])
+        })
+        .collect::<Vec<_>>();
 
     // enable swapchain extension here (possibly unchecked?)
     let device_extension_names_raw = [Swapchain::name().as_ptr()];
@@ -197,9 +193,11 @@ pub fn create_logical_device(
         .enabled_extension_names(&device_extension_names_raw);
 
     // Create the physical device!
-    let device: ash::Device = unsafe { instance
-        .create_device(*physical_device, &device_create_info, None)
-        .expect("Failed to create logical device!") };
+    let device: ash::Device = unsafe {
+        instance
+            .create_device(*physical_device, &device_create_info, None)
+            .expect("Failed to create logical device!")
+    };
 
     (device, indices)
 }
